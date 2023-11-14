@@ -71,76 +71,58 @@ def get_frame(filename, index):
     # Return None if the frame could not be retrieved.
     return None
 
-if __name__ == "__main__":
-    # Retrieve the first frame, second frame, and the 292nd frame from the video.
-    initFrame = get_frame(VFILE, 1)
-    initFrame2 = get_frame(VFILE, 292)
-    initFrame3 = get_frame(VFILE, 2)
 
-    # Convert these frames to grayscale.
-    grayFrame = cv2.cvtColor(initFrame, cv2.COLOR_BGR2GRAY)
-    initFrame2 = cv2.cvtColor(initFrame2, cv2.COLOR_BGR2GRAY)
-    initFrame3 = cv2.cvtColor(initFrame3, cv2.COLOR_BGR2GRAY)
+def get_grayscale_frame(video_file, frame_index):
+    """Retrieve a specific frame from a video file and convert it to grayscale."""
+    frame = get_frame(video_file, frame_index)
+    return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame is not None else None
 
-    # Extract specific pixel values from grayFrame for comparison.
-    initL1 = []
-    initL2 = []
-    for ligne in grayFrame[:, 400:850]:
-        initL1.append(ligne[200])
-        initL2.append(ligne[300])
-    initL1 = np.array(initL1)
-    initL2 = np.array(initL2)
 
-    # Calculate and print the correlation coefficients.
-    print(np.corrcoef(grayFrame, grayFrame))
-    print(np.corrcoef(grayFrame, initFrame2))
-
-    # Compute the difference in correlation coefficients between frames.
-    np_subtr = np.subtract(np.corrcoef(grayFrame, grayFrame), np.corrcoef(grayFrame, initFrame3))
-    np_mean = np.mean(np_subtr)
-    print('numpy mean is:', np_mean)
-
-    # Display the difference in correlation coefficients.
-    plt.imshow(np_subtr)
+def display_correlation_difference(base_frame, compare_frame, title):
+    """Calculate and display the correlation difference between two frames."""
+    correlation_diff = np.subtract(np.corrcoef(base_frame, base_frame), 
+                                   np.corrcoef(base_frame, compare_frame))
+    plt.imshow(correlation_diff)
+    plt.title(title)
     plt.show()
 
-    # Loop through each frame in the video.
-    for e, f in enumerate(get_frames(VFILE)):
-        if f is None:
+
+def process_and_display_frames(video_file, base_frame):
+    """Process each frame in the video and display the correlation differences."""
+    window_name_diff = 'Frame Difference'
+    window_name_processed = 'Processed Frame'
+
+    for e, frame in enumerate(get_frames(video_file)):
+        if frame is None:
             break
 
-        # Process the frame and extract specific pixel values.
-        f = f[:, 400:850]
-        f = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY)
-        f1 = f.copy()
-        L1 = []
-        L2 = []
+        processed_frame = cv2.cvtColor(frame[:, 400:850], cv2.COLOR_BGR2GRAY)
+        processed_frame[:, [200, 300]] = 250  # Highlight specific pixel values.
 
-        for ligne in f1:
-            L1.append(ligne[200])
-            L2.append(ligne[300])
-            # Highlight specific pixel values in the frame.
-            ligne[200] = 250
-            ligne[300] = 250
+        # Calculate the correlation differences and display in the same window.
+        diff = np.subtract(np.corrcoef(base_frame[:, 400:850], base_frame[:, 400:850]),
+                           np.corrcoef(base_frame[:, 400:850], processed_frame))
+        cv2.imshow(window_name_diff, cv2.resize(diff, dsize=(450, 450), interpolation=cv2.INTER_CUBIC))
+        cv2.imshow(window_name_processed, processed_frame)
 
-        L1 = np.array(L1)
-        L2 = np.array(L2)
-
-        # Calculate the difference in correlation coefficients and display it.
-        diff = np.subtract(np.corrcoef(grayFrame[:, 400:850], grayFrame[:, 400:850]), np.corrcoef(grayFrame[:, 400:850], f))
-        diff2 = np.corrcoef(grayFrame[:, 400:850], f)
-        res = cv2.resize(diff, dsize=(450, 450), interpolation=cv2.INTER_CUBIC)
-        cv2.imshow('frame', res)
-        cv2.imshow('frame2', f1)
-
-        if cv2.waitKey(10) == 27:  # Check for 'Esc' key press to exit the loop.
+        if cv2.waitKey(10) == 27:  # ESC key
             break
 
     cv2.destroyAllWindows()
+    
 
-    # Retrieve and display a specific frame (index 80) from the video.
-    frame_80 = get_frame(VFILE, 80)
-    frame_80_rgb = cv2.cvtColor(frame_80, cv2.COLOR_BGR2RGB)
+if __name__ == "__main__":
+    grayFrame = get_grayscale_frame(VFILE, 1)
+    initFrame2 = get_grayscale_frame(VFILE, 292)
+    initFrame3 = get_grayscale_frame(VFILE, 2)
+
+    np_subtr = np.subtract(np.corrcoef(grayFrame, grayFrame), np.corrcoef(grayFrame, initFrame3))
+    print('numpy mean is:', np.mean(np_subtr))
+    display_correlation_difference(grayFrame, initFrame3, 'Correlation Difference')
+
+    process_and_display_frames(VFILE, grayFrame)
+
+    frame_80_rgb = cv2.cvtColor(get_grayscale_frame(VFILE, 80), cv2.COLOR_BGR2RGB)
     print('shape', frame_80_rgb.shape)
     print('pixel at (600,600)', frame_80_rgb[600, 600, :])
     plt.imshow(frame_80_rgb)
