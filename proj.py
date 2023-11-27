@@ -97,8 +97,8 @@ def calculate_correlation_change(current_frame, base_frame, line_position):
     """
     base_line = base_frame[:, line_position]
     current_line = current_frame[:, line_position]
-    corr_base = np.corrcoef(base_line, base_line)[0, 1]
-    corr_current = np.corrcoef(base_line, current_line)[0, 1]
+    corr_base = np.corrcoef(base_line, base_line)
+    corr_current = np.corrcoef(base_line, current_line)
     return np.subtract(corr_base, corr_current)
 
 
@@ -108,7 +108,7 @@ def process_and_display_frames(video_file, base_frame):
     line1_crossed, line2_crossed = False, False
     frame_counter, debounce_frames = 0, 30 # debounce frames, number of frames to ignore after a crossing is detected
     line1_position, line2_position = 135, 420  # Adjust as needed
-    correlation_threshold = 0.96  # Adjust based on your testing
+    correlation_threshold = 0.20  # Adjust based on your testing
     correlations = []  # List to store correlation values
     first_line_crossed = None  # Keeps track of which line was crossed first
 
@@ -123,20 +123,27 @@ def process_and_display_frames(video_file, base_frame):
         corr_change_line1 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line1_position)
         corr_change_line2 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line2_position)
 
+
         # Store the mean of the correlation changes
         correlations.append(np.mean([corr_change_line1, corr_change_line2]))
         numpy_mean1 = np.mean(corr_change_line1)
         numpy_mean2 = np.mean(corr_change_line2)
 
+        print(corr_change_line1, numpy_mean1, corr_change_line2, numpy_mean2)
+
+
+        #numpydiff1 =  np.diff(corr_change_line1) / corr_change_line1[:,1:] * 100
+        #numpydiff2 = np.diff(corr_change_line2) / corr_change_line2[:,1:] * 100
+
 
         # Detect line crossing with debounce
-        if corr_change_line1 > correlation_threshold and not line1_crossed and frame_counter > debounce_frames:
+        if numpy_mean1 > correlation_threshold and not line1_crossed and frame_counter > debounce_frames:
             line1_crossed = True
             if not line2_crossed:  # Only start crossing process if line2 hasn't been crossed yet
                 first_line_crossed = 1
             frame_counter = 0  # Reset frame counter
 
-        if corr_change_line2 > correlation_threshold and not line2_crossed and frame_counter > debounce_frames:
+        if numpy_mean2 > correlation_threshold and not line2_crossed and frame_counter > debounce_frames:
             line2_crossed = True
             if not line1_crossed:  # Only start crossing process if line1 hasn't been crossed yet
                 first_line_crossed = 2
@@ -169,7 +176,7 @@ def process_and_display_frames(video_file, base_frame):
 
         frame_counter += 1
 
-        if cv2.waitKey(int(33 * 2)) == 27:  # ESC key
+        if cv2.waitKey(int(2)) == 27:  # ESC key
             break
 
     cv2.destroyAllWindows()
