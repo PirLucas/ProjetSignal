@@ -72,58 +72,118 @@ def get_frame(filename, index):
     return None
 
 
-def get_grayscale_frame(video_file, frame_index):
+def getGrayscaleFrame(video_file, frame_index):
     """Retrieve a specific frame from a video file and convert it to grayscale."""
     frame = get_frame(video_file, frame_index)
     return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame is not None else None
 
 
-def display_correlation_difference(base_frame, compare_frame, title):
+def display_correlation_difference(baseFrame, compareFrame, title):
     """Calculate and display the correlation difference between two frames."""
-    correlation_diff = np.subtract(np.corrcoef(base_frame, base_frame), 
-                                   np.corrcoef(base_frame, compare_frame))
+    correlation_diff = np.subtract(np.corrcoef(baseFrame, baseFrame), 
+                                   np.corrcoef(baseFrame, compareFrame))
     plt.imshow(correlation_diff)
     plt.title(title)
     plt.show()
 
 
-def process_and_display_frames(video_file, base_frame):
-    """Process each frame in the video and display the correlation differences."""
-    window_name_diff = 'Frame Difference'
-    window_name_processed = 'Processed Frame'
+def calculate_correlation_change(current_frame, base_frame, line_position):
+    """
+    Calculate the correlation change at a specific line position.
+    :param current_frame: The current frame to compare.
+    :param base_frame: The base frame for comparison.
+    :param line_position: The position of the line to check.
+    :return: The correlation change at the line position.
+    """
+    base_line = base_frame[:, line_position]
+    current_line = current_frame[:, line_position]
+    corr_base = np.corrcoef(base_line, base_line)
+    corr_current = np.corrcoef(base_line, current_line)
+    return np.subtract(corr_base, corr_current)
 
-    for e, frame in enumerate(get_frames(video_file)):
+
+def process_and_display_frames(video_file, base_frame):
+    enter_count = 0
+    exit_count = 0
+    line1_crossed, line2_crossed = False, False
+    frame_counter, debounce_frames = 0, 30 # debounce frames, number of frames to ignore after a crossing is detected
+    line1_position, line2_position = 135, 420  # Adjust as needed
+    correlation_threshold = 0.20  # Adjust based on your testing
+    correlations = []  # List to store correlation values
+    first_line_crossed = None  # Keeps track of which line was crossed first
+
+
+    for frame in get_frames(video_file):
         if frame is None:
             break
 
         processed_frame = cv2.cvtColor(frame[:, 400:850], cv2.COLOR_BGR2GRAY)
-        processed_frame[:, [200, 300]] = 250  # Highlight specific pixel values.
 
-        # Calculate the correlation differences and display in the same window.
-        diff = np.subtract(np.corrcoef(base_frame[:, 400:850], base_frame[:, 400:850]),
-                           np.corrcoef(base_frame[:, 400:850], processed_frame))
-        cv2.imshow(window_name_diff, cv2.resize(diff, dsize=(450, 450), interpolation=cv2.INTER_CUBIC))
-        cv2.imshow(window_name_processed, processed_frame)
+        # Calculate correlation changes at the line positions
+        corr_change_line1 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line1_position)
+        corr_change_line2 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line2_position)
 
-        if cv2.waitKey(10) == 27:  # ESC key
+
+        # Store the mean of the correlation changes
+        correlations.append(np.mean([corr_change_line1, corr_change_line2]))
+        numpy_mean1 = np.mean(corr_change_line1)
+        numpy_mean2 = np.mean(corr_change_line2)
+
+        print(corr_change_line1, numpy_mean1, corr_change_line2, numpy_mean2)
+
+
+        #numpydiff1 =  np.diff(corr_change_line1) / corr_change_line1[:,1:] * 100
+        #numpydiff2 = np.diff(corr_change_line2) / corr_change_line2[:,1:] * 100
+
+
+        # Detect line crossing with debounce
+        if numpy_mean1 > correlation_threshold and not line1_crossed and frame_counter > debounce_frames:
+            line1_crossed = True
+            if not line2_crossed:  # Only start crossing process if line2 hasn't been crossed yet
+                first_line_crossed = 1
+            frame_counter = 0  # Reset frame counter
+
+        if numpy_mean2 > correlation_threshold and not line2_crossed and frame_counter > debounce_frames:
+            line2_crossed = True
+            if not line1_crossed:  # Only start crossing process if line1 hasn't been crossed yet
+                first_line_crossed = 2
+            frame_counter = 0  # Reset frame counter
+
+        # Check sequence for entering or exiting
+        if first_line_crossed:
+            if first_line_crossed == 1 and line2_crossed:
+                exit_count += 1  # Exiting
+                print("Person Exited")
+                line1_crossed, line2_crossed, first_line_crossed = False, False, None
+
+            elif first_line_crossed == 2 and line1_crossed:
+                enter_count += 1  # Entering
+                print("Person Entered")
+                line1_crossed, line2_crossed, first_line_crossed = False, False, None
+
+        frame_counter += 1
+
+        # Display frames with lines and counts
+        cv2.line(processed_frame, (line1_position, 0), (line1_position, processed_frame.shape[0]), (255, 0, 0), 2)
+        cv2.line(processed_frame, (line2_position, 0), (line2_position, processed_frame.shape[0]), (0, 255, 0), 2)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(processed_frame, f'Entering: {enter_count}', (10, 30), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Exiting: {exit_count}', (10, 70), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Mean1: {numpy_mean1:.2f}', (10, 110), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Mean2: {numpy_mean2:.2f}', (10, 130), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
+
+        cv2.imshow('Processed Frame', processed_frame)
+
+        frame_counter += 1
+
+        if cv2.waitKey(int(2)) == 27:  # ESC key
             break
 
     cv2.destroyAllWindows()
-    
+    return enter_count, exit_count, correlations
 
 if __name__ == "__main__":
-    grayFrame = get_grayscale_frame(VFILE, 1)
-    initFrame2 = get_grayscale_frame(VFILE, 292)
-    initFrame3 = get_grayscale_frame(VFILE, 2)
+    gray_frame = getGrayscaleFrame(VFILE, 1)
 
-    np_subtr = np.subtract(np.corrcoef(grayFrame, grayFrame), np.corrcoef(grayFrame, initFrame3))
-    print('numpy mean is:', np.mean(np_subtr))
-    display_correlation_difference(grayFrame, initFrame3, 'Correlation Difference')
-
-    process_and_display_frames(VFILE, grayFrame)
-
-    frame_80_rgb = cv2.cvtColor(get_grayscale_frame(VFILE, 80), cv2.COLOR_BGR2RGB)
-    print('shape', frame_80_rgb.shape)
-    print('pixel at (600,600)', frame_80_rgb[600, 600, :])
-    plt.imshow(frame_80_rgb)
-    plt.show()
+    enter_count, exit_count, correlations = process_and_display_frames(VFILE, gray_frame)
+    print(f"People Entered: {enter_count}, People Exited: {exit_count}", f"max correlation: {max(correlations)}")
