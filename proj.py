@@ -1,14 +1,21 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from scipy import signal
-import sounddevice as sd
-from scipy.io.wavfile import read
-import os
-import sys
-from skimage import exposure, color, filters, measure
-import cv2
+import copy
+import threading
 
-VFILE = "projet/20231031_144438.mp4"
+import cv2
+import matplotlib.pyplot as plt
+import numpy as np
+import scipy
+from LogoDetector2 import LogoDetector
+import time
+from skimage.filters import threshold_otsu
+
+VFILE = "projet/logo4.mp4"
+FFT2_LOGO = np.fft.fft2(
+            np.rot90(
+                cv2.imread("projet/logo.jpg"),
+                2
+            )
+        )
 
 def get_frames(filename):
     """
@@ -80,7 +87,7 @@ def getGrayscaleFrame(video_file, frame_index):
 
 def display_correlation_difference(baseFrame, compareFrame, title):
     """Calculate and display the correlation difference between two frames."""
-    correlation_diff = np.subtract(np.corrcoef(baseFrame, baseFrame), 
+    correlation_diff = np.subtract(np.corrcoef(baseFrame, baseFrame),
                                    np.corrcoef(baseFrame, compareFrame))
     plt.imshow(correlation_diff)
     plt.title(title)
@@ -106,23 +113,22 @@ def process_and_display_frames(video_file, base_frame):
     enter_count = 0
     exit_count = 0
     line1_crossed, line2_crossed = False, False
-    frame_counter, debounce_frames = 0, 30 # debounce frames, number of frames to ignore after a crossing is detected
-    line1_position, line2_position = 135, 420  # Adjust as needed
+    frame_counter, debounce_frames = 0, 60  # debounce frames, number of frames to ignore after a crossing is detected
+    line1_position, line2_position = 270, 100  # Adjust as needed
     correlation_threshold = 0.20  # Adjust based on your testing
     correlations = []  # List to store correlation values
     first_line_crossed = None  # Keeps track of which line was crossed first
-
+    detector = LogoDetector(1700000000, "projet/logo4.jpg")
 
     for frame in get_frames(video_file):
         if frame is None:
             break
 
-        processed_frame = cv2.cvtColor(frame[:, 400:850], cv2.COLOR_BGR2GRAY)
+        processed_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)  # 400:850
 
         # Calculate correlation changes at the line positions
-        corr_change_line1 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line1_position)
-        corr_change_line2 = calculate_correlation_change(processed_frame, base_frame[:, 400:850], line2_position)
-
+        corr_change_line1 = calculate_correlation_change(processed_frame, base_frame, line1_position)
+        corr_change_line2 = calculate_correlation_change(processed_frame, base_frame, line2_position)
 
         # Store the mean of the correlation changes
         correlations.append(np.mean([corr_change_line1, corr_change_line2]))
@@ -131,9 +137,6 @@ def process_and_display_frames(video_file, base_frame):
 
         print(corr_change_line1, numpy_mean1, corr_change_line2, numpy_mean2)
 
-
-        #numpydiff1 =  np.diff(corr_change_line1) / corr_change_line1[:,1:] * 100
-        #numpydiff2 = np.diff(corr_change_line2) / corr_change_line2[:,1:] * 100
 
 
         # Detect line crossing with debounce
@@ -153,15 +156,18 @@ def process_and_display_frames(video_file, base_frame):
         if first_line_crossed:
             if first_line_crossed == 1 and line2_crossed:
                 exit_count += 1  # Exiting
-                print("Person Exited")
+                detector.add_frame(frame)
+                # print("Person Exited")
                 line1_crossed, line2_crossed, first_line_crossed = False, False, None
 
             elif first_line_crossed == 2 and line1_crossed:
                 enter_count += 1  # Entering
-                print("Person Entered")
+                detector.add_frame(frame)
+                # print("Person Entered")
                 line1_crossed, line2_crossed, first_line_crossed = False, False, None
 
         frame_counter += 1
+
 
         # Display frames with lines and counts
         cv2.line(processed_frame, (line1_position, 0), (line1_position, processed_frame.shape[0]), (255, 0, 0), 2)
@@ -170,20 +176,21 @@ def process_and_display_frames(video_file, base_frame):
         cv2.putText(processed_frame, f'Entering: {enter_count}', (10, 30), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(processed_frame, f'Exiting: {exit_count}', (10, 70), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
         cv2.putText(processed_frame, f'Mean1: {numpy_mean1:.2f}', (10, 110), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(processed_frame, f'Mean2: {numpy_mean2:.2f}', (10, 130), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-
-        cv2.imshow('Processed Frame', processed_frame)
-
+        cv2.putText(processed_frame, f'Mean2: {numpy_mean2:.2f}', (10, 140), font, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.imshow("Image", processed_frame)
         frame_counter += 1
 
         if cv2.waitKey(int(2)) == 27:  # ESC key
             break
 
     cv2.destroyAllWindows()
+    print(f"{detector.calcul_convolutions()} logos detected")
     return enter_count, exit_count, correlations
+
 
 if __name__ == "__main__":
     gray_frame = getGrayscaleFrame(VFILE, 1)
 
     enter_count, exit_count, correlations = process_and_display_frames(VFILE, gray_frame)
     print(f"People Entered: {enter_count}, People Exited: {exit_count}", f"max correlation: {max(correlations)}")
+
