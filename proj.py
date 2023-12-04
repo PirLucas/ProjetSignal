@@ -4,18 +4,59 @@ import threading
 import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import scipy
+from scipy import ndimage
 from LogoDetector2 import LogoDetector
 import time
-from skimage.filters import threshold_otsu
+from skimage import filters, color, measure, exposure
 
-VFILE = "projet/logo4.mp4"
-FFT2_LOGO = np.fft.fft2(
-            np.rot90(
-                cv2.imread("projet/logo.jpg"),
-                2
-            )
-        )
+VFILE = "projet/logo.mp4"
+
+
+def get_frame_ratio(frame: np.ndarray) -> float:
+    filled = ndimage.binary_fill_holes(get_binary_frame(frame), structure=np.ones((3, 3)))
+    label, n = measure.label(filled, return_num=True)
+    props = measure.regionprops(label)
+    region = max(props, key=lambda p: p.area)
+    return region.axis_major_length / region.axis_minor_length
+
+
+def get_frame_ratios(frame: np.ndarray) -> list[float]:
+    filled = ndimage.binary_fill_holes(get_binary_frame(frame), structure=np.ones((3, 3)))
+    label, n = measure.label(filled, return_num=True)
+    props = measure.regionprops(label)
+    return [
+        region.axis_major_length / region.axis_minor_length
+        if region.axis_major_length != 0 and region.axis_minor_length != 0
+        else 0
+        for region in props
+    ]
+
+
+def check_ratio(ratios: list[float], good_ratio: float, tolerance: float) -> bool:
+    for ratio in ratios:
+        if good_ratio - tolerance <= ratio <= good_ratio + tolerance:
+            return True
+    return False
+
+
+def check_frame(frame: np.ndarray, ratio) -> bool:
+    return check_ratio(get_frame_ratios(frame), ratio, 0.0345)
+
+def get_binary_frame(frame: np.ndarray) -> np.ndarray:
+    gray = color.rgb2gray(frame)
+    return gray > filters.threshold_otsu(gray)
+
+
+def get_luminosity(frame: np.ndarray) -> tuple:
+    rgb = [0, 0, 0]
+    for i in range(len(frame)):
+        for j in frame[i]:
+            rgb[0] += j[0]
+            rgb[1] += j[1]
+            rgb[2] += j[2]
+    length = len(frame) * len(frame[0])
+    return rgb[0] / length, rgb[1] / length, rgb[2] / length
+
 
 def get_frames(filename):
     """
@@ -118,9 +159,12 @@ def process_and_display_frames(video_file, base_frame):
     correlation_threshold = 0.20  # Adjust based on your testing
     correlations = []  # List to store correlation values
     first_line_crossed = None  # Keeps track of which line was crossed first
-    detector = LogoDetector(1700000000, "projet/logo4.jpg")
+    logo_ratio: float = get_frame_ratio(cv2.imread('projet/logo4.jpg'))
+
+    previous_check: bool = False
 
     for frame in get_frames(video_file):
+        has_logo: bool | None = None
         if frame is None:
             break
 
@@ -136,8 +180,6 @@ def process_and_display_frames(video_file, base_frame):
         numpy_mean2 = np.mean(corr_change_line2)
 
         print(corr_change_line1, numpy_mean1, corr_change_line2, numpy_mean2)
-
-
 
         # Detect line crossing with debounce
         if numpy_mean1 > correlation_threshold and not line1_crossed and frame_counter > debounce_frames:
@@ -156,35 +198,43 @@ def process_and_display_frames(video_file, base_frame):
         if first_line_crossed:
             if first_line_crossed == 1 and line2_crossed:
                 exit_count += 1  # Exiting
-                detector.add_frame(frame)
-                # print("Person Exited")
+                has_logo = check_frame(frame, logo_ratio)
+                previous_check = has_logo
+                print("Person Exited")
                 line1_crossed, line2_crossed, first_line_crossed = False, False, None
 
             elif first_line_crossed == 2 and line1_crossed:
                 enter_count += 1  # Entering
-                detector.add_frame(frame)
-                # print("Person Entered")
+                has_logo = check_frame(frame, logo_ratio)
+                previous_check = has_logo
+                print("Person Entered")
                 line1_crossed, line2_crossed, first_line_crossed = False, False, None
 
         frame_counter += 1
-
 
         # Display frames with lines and counts
         cv2.line(processed_frame, (line1_position, 0), (line1_position, processed_frame.shape[0]), (255, 0, 0), 2)
         cv2.line(processed_frame, (line2_position, 0), (line2_position, processed_frame.shape[0]), (0, 255, 0), 2)
         font = cv2.FONT_HERSHEY_SIMPLEX
-        cv2.putText(processed_frame, f'Entering: {enter_count}', (10, 30), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(processed_frame, f'Exiting: {exit_count}', (10, 70), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(processed_frame, f'Mean1: {numpy_mean1:.2f}', (10, 110), font, 1, (255, 255, 255), 2, cv2.LINE_AA)
-        cv2.putText(processed_frame, f'Mean2: {numpy_mean2:.2f}', (10, 140), font, 1, (255, 0, 0), 2, cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Entering: {enter_count}', (10, 30), font, 1, (255, 255, 255), 2,
+                    cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Exiting: {exit_count}', (10, 70), font, 1, (255, 255, 255), 2,
+                    cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Mean1: {numpy_mean1:.2f}', (10, 110), font, 1, (255, 255, 255), 2,
+                    cv2.LINE_AA)
+        cv2.putText(processed_frame, f'Mean2: {numpy_mean2:.2f}', (10, 150), font, 1, (255, 0, 0), 2,
+                    cv2.LINE_AA)
+        cv2.putText(processed_frame, f"Logo ? : {has_logo if has_logo is not None else previous_check}", (10, 230), font, 1, (255, 0, 0),
+                    2, cv2.LINE_AA)
         cv2.imshow("Image", processed_frame)
+
         frame_counter += 1
 
         if cv2.waitKey(int(2)) == 27:  # ESC key
             break
 
     cv2.destroyAllWindows()
-    print(f"{detector.calcul_convolutions()} logos detected")
+    # print(f"{detector.calcul_convolutions()} logos detected")
     return enter_count, exit_count, correlations
 
 
@@ -193,4 +243,3 @@ if __name__ == "__main__":
 
     enter_count, exit_count, correlations = process_and_display_frames(VFILE, gray_frame)
     print(f"People Entered: {enter_count}, People Exited: {exit_count}", f"max correlation: {max(correlations)}")
-
